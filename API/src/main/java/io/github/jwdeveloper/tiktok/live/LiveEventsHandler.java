@@ -25,9 +25,6 @@ package io.github.jwdeveloper.tiktok.live;
 import io.github.jwdeveloper.tiktok.data.events.common.TikTokEvent;
 import io.github.jwdeveloper.tiktok.live.builder.EventConsumer;
 
-import java.util.HashSet;
-import java.util.Optional;
-
 public interface LiveEventsHandler {
     void publish(LiveClient tikTokLiveClient, TikTokEvent tikTokEvent);
 
@@ -38,4 +35,11 @@ public interface LiveEventsHandler {
     <T extends TikTokEvent> void unsubscribe(EventConsumer<T> consumer);
 
     <T extends TikTokEvent> void unsubscribe(Class<?> clazz, EventConsumer<T> consumer);
+
+    /**
+     * Removes all event subscriptions. Default implementation does nothing; custom handlers should
+     * clear their internal subscriber state when supporting full client shutdown.
+     */
+    default void clearSubscriptions() {
+    }
 }

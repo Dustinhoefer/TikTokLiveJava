@@ -36,24 +36,29 @@ public class TikTokLiveEventHandler implements LiveEventsHandler {
         events = new HashMap<>();
     }
 
-    public void publish(LiveClient tikTokLiveClient, TikTokEvent tikTokEvent) {
+    public synchronized void publish(LiveClient tikTokLiveClient, TikTokEvent tikTokEvent) {
         Optional.ofNullable(events.get(TikTokEvent.class)).ifPresent(handlers -> handlers.forEach(handler -> handler.onEvent(tikTokLiveClient, tikTokEvent)));
         Optional.ofNullable(events.get(tikTokEvent.getClass())).ifPresent(handlers -> handlers.forEach(handler -> handler.onEvent(tikTokLiveClient, tikTokEvent)));
     }
 
-    public <T extends TikTokEvent> void subscribe(Class<?> clazz, EventConsumer<T> event) {
+    public synchronized <T extends TikTokEvent> void subscribe(Class<?> clazz, EventConsumer<T> event) {
         events.computeIfAbsent(clazz, e -> new HashSet<>()).add(event);
     }
 
-    public <T extends TikTokEvent> void unsubscribeAll(Class<?> clazz) {
+    public synchronized <T extends TikTokEvent> void unsubscribeAll(Class<?> clazz) {
         events.remove(clazz);
     }
 
-    public <T extends TikTokEvent> void unsubscribe(EventConsumer<T> consumer) {
-		events.forEach((key, value) -> value.remove(consumer));
+    public synchronized <T extends TikTokEvent> void unsubscribe(EventConsumer<T> consumer) {
+        events.forEach((key, value) -> value.remove(consumer));
     }
 
-    public <T extends TikTokEvent> void unsubscribe(Class<?> clazz, EventConsumer<T> consumer) {
+    public synchronized <T extends TikTokEvent> void unsubscribe(Class<?> clazz, EventConsumer<T> consumer) {
         Optional.ofNullable(clazz).map(events::get).ifPresent(consumers -> consumers.remove(consumer));
-	}
+    }
+
+    @Override
+    public synchronized void clearSubscriptions() {
+        events.clear();
+    }
 }

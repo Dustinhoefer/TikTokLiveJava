@@ -111,6 +111,17 @@ class TikTokListenersManagerTest {
         assertDoesNotThrow(() -> tikTokListenersManager.removeListener(listener));
     }
 
+    @Test
+    void shutdown_isIdempotent() {
+        tikTokListenersManager.shutdown();
+        assertDoesNotThrow(() -> tikTokListenersManager.shutdown());
+    }
+
+    @Test
+    void addListener_afterShutdown_throws() {
+        tikTokListenersManager.shutdown();
+        assertThrows(TikTokLiveException.class, () -> tikTokListenersManager.addListener(new TikTokEventListenerTest()));
+    }
 
     public static class TikTokEventListenerTest {
         @TikTokEventObserver

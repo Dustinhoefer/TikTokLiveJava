@@ -36,6 +36,7 @@ import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class TikTokListenersManager implements ListenersManager {
@@ -44,6 +45,7 @@ public class TikTokListenersManager implements ListenersManager {
     private final LiveEventsHandler eventsHandler;
     private final ExecutorService executorService;
     private final DependanceContainer dependanceContainer;
+    private final AtomicBoolean shutdown = new AtomicBoolean(false);
 
 
     public TikTokListenersManager(LiveEventsHandler tikTokEventHandler,
@@ -61,6 +63,9 @@ public class TikTokListenersManager implements ListenersManager {
 
     @Override
     public void addListener(Object listener) {
+        if (shutdown.get()) {
+            throw new TikTokLiveException("ListenersManager has been shut down");
+        }
         if (listeners.containsKey(listener)) {
             throw new TikTokLiveException("Listener " + listener.getClass() + " has already been registered");
         }
@@ -82,6 +87,15 @@ public class TikTokListenersManager implements ListenersManager {
             eventsHandler.unsubscribe(methodInfo.getEventType(), methodInfo.getAction());
         }
         listeners.remove(listener);
+    }
+
+    @Override
+    public void shutdown() {
+        if (!shutdown.compareAndSet(false, true)) {
+            return;
+        }
+        executorService.shutdownNow();
+        listeners.clear();
     }
 
     private List<ListenerMethodInfo> getMethodsInfo(Object listener) {

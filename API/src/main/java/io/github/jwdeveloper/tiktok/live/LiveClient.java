@@ -63,6 +63,15 @@ public interface LiveClient {
     }
 
     /**
+     * Shuts down this client permanently: closes the connection, cancels pending reconnect attempts,
+     * removes event listeners and subscriptions, and releases listener thread-pool resources.
+     * <p>
+     * The client must not be used after {@code stop()}; further {@link #connect()} calls will fail.
+     * Idempotent: safe to call more than once.
+     */
+    void stop();
+
+    /**
      * Use to manually invoke event
      */
     void publishEvent(TikTokEvent event);

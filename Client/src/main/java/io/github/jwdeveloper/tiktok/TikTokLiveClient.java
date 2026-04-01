@@ -37,10 +37,13 @@ import io.github.jwdeveloper.tiktok.live.*;
 import io.github.jwdeveloper.tiktok.messages.webcast.ProtoMessageFetchResult;
 import io.github.jwdeveloper.tiktok.models.ConnectionState;
 import io.github.jwdeveloper.tiktok.websocket.*;
+import lombok.AccessLevel;
 import lombok.Getter;
 
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
 
@@ -56,6 +59,13 @@ public class TikTokLiveClient implements LiveClient
     private final Logger logger;
     private final GiftsManager giftManager;
     private final LiveMessagesHandler messageHandler;
+
+    @Getter(AccessLevel.NONE)
+    private final Object lifecycleLock = new Object();
+    @Getter(AccessLevel.NONE)
+    private final AtomicBoolean stopped = new AtomicBoolean(false);
+    @Getter(AccessLevel.NONE)
+    private volatile ScheduledFuture<?> pendingReconnect;
 
     public TikTokLiveClient(
             LiveMessagesHandler messageHandler,
@@ -79,6 +89,11 @@ public class TikTokLiveClient implements LiveClient
     }
 
     public void connect() {
+        synchronized (lifecycleLock) {
+            if (stopped.get()) {
+                throw new TikTokLiveException("Client has been stopped and cannot connect again");
+            }
+        }
         try {
             if (clientSettings.isUseEulerstreamWebsocket())
                 tryEulerConnect();
@@ -90,11 +105,19 @@ public class TikTokLiveClient implements LiveClient
             tikTokEventHandler.publish(this, new TikTokDisconnectedEvent("Exception: " + e.getMessage()));
 
             if (e instanceof TikTokLiveOfflineHostException && clientSettings.isRetryOnConnectionFailure()) {
-                AsyncHandler.getReconnectScheduler().schedule(() -> {
-                    logger.info("Reconnecting");
-                    tikTokEventHandler.publish(this, new TikTokReconnectingEvent());
-                    this.connect();
-                }, clientSettings.getRetryConnectionTimeout().toMillis(), TimeUnit.MILLISECONDS);
+                synchronized (lifecycleLock) {
+                    if (!stopped.get()) {
+                        cancelPendingReconnectLocked();
+                        pendingReconnect = AsyncHandler.getReconnectScheduler().schedule(() -> {
+                            if (stopped.get()) {
+                                return;
+                            }
+                            logger.info("Reconnecting");
+                            tikTokEventHandler.publish(this, new TikTokReconnectingEvent());
+                            this.connect();
+                        }, clientSettings.getRetryConnectionTimeout().toMillis(), TimeUnit.MILLISECONDS);
+                    }
+                }
             }
             throw e;
         } catch (Exception e) {
@@ -111,6 +134,10 @@ public class TikTokLiveClient implements LiveClient
 
         setState(ConnectionState.CONNECTING);
         tikTokEventHandler.publish(this, new TikTokConnectingEvent());
+        if (stopped.get()) {
+            setState(ConnectionState.DISCONNECTED);
+            throw new TikTokLiveException("Connection aborted: client was stopped");
+        }
         webSocketClient.start(null, this);
         setState(ConnectionState.CONNECTED);
     }
@@ -161,6 +188,10 @@ public class TikTokLiveClient implements LiveClient
 
         var liveConnectionRequest = new LiveConnectionData.Request(userData.getRoomInfo().getRoomId());
         var liveConnectionData = httpClient.fetchLiveConnectionData(liveConnectionRequest);
+        if (stopped.get()) {
+            setState(ConnectionState.DISCONNECTED);
+            throw new TikTokLiveException("Connection aborted: client was stopped");
+        }
         webSocketClient.start(liveConnectionData, this);
 
         setState(ConnectionState.CONNECTED);
@@ -173,6 +204,29 @@ public class TikTokLiveClient implements LiveClient
 		if (!roomInfo.hasConnectionState(ConnectionState.DISCONNECTED))
 			setState(ConnectionState.DISCONNECTED);
 	}
+
+    @Override
+    public void stop() {
+        synchronized (lifecycleLock) {
+            if (!stopped.compareAndSet(false, true)) {
+                return;
+            }
+            cancelPendingReconnectLocked();
+        }
+        disconnect(LiveClientStopType.DISCONNECT);
+        for (Object listener : new ArrayList<>(listenersManager.getListeners())) {
+            listenersManager.removeListener(listener);
+        }
+        tikTokEventHandler.clearSubscriptions();
+        listenersManager.shutdown();
+    }
+
+    private void cancelPendingReconnectLocked() {
+        if (pendingReconnect != null) {
+            pendingReconnect.cancel(false);
+            pendingReconnect = null;
+        }
+    }
 
     private void setState(ConnectionState connectionState) {
         logger.info("TikTokLive client state: " + connectionState.name());

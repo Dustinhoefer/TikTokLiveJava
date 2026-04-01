@@ -34,4 +34,11 @@ public interface ListenersManager
     void addListener(Object listener);
 
     void removeListener(Object listener);
+
+    /**
+     * Releases resources held by this manager (e.g. async listener executor). Default no-op.
+     * Idempotent.
+     */
+    default void shutdown() {
+    }
 }
